@@ -82,11 +82,105 @@ link -&gt; Only selected option 'force non trivial' in order to avoid using loop
 </rspec>
 ```
 
+#### File System requirements
+
+The nodes provisioned in CloudLab come with a file mounts that do not have enough space for building the kernel. There are two approaches that were tried.
+
+1. Data set 
+2. Shared file system for the entire project
+
+##### Data Set
+
+This is CloudLab's offering to suit needs where large training data has to be loaded for training models. It is offered as a NFS mount so we can mount it directly to the nodes and use it. This requires the change in the project profile to add the newly created data set. 
+
+It is relativly simple to create a dataset in CloudLab, it is important to get a data set with a relatively long life and it must exist in the same CloudLab cluster as the project. Once the dataset is created we will use the URN provided to specify the mount in our project profile 
+
+Example URN: `urn:publicid:IDN+utah.cloudlab.us:cu-bison-lab-pg0+stdataset+test`
+
+`cu-bison-lab-pg0` is the project name
+
+`test` is the name of the dataset
+
+##### Experiment Profile Changes 
+
+The basic CloudLab experimetn profile can be edited using the UI, to add the dataset it will be converted to a geni script. Here is an example with the support to add the data set in.
+
+```python
+"""Profile to perform kernel builds for BPF compatibility. Maintainer - punith.patil@colorado.edu"""
+
+#
+# NOTE: This code was machine converted. An actual human would not
+#       write code like this!
+#
+
+# Import the Portal object.
+import geni.portal as portal
+# Import the ProtoGENI library.
+import geni.rspec.pg as pg
+# Import the Emulab specific extensions.
+import geni.rspec.emulab as emulab
+
+# Create a portal object,
+pc = portal.Context()
+
+# Create a Request object to start building the RSpec.
+request = pc.makeRequestRSpec()
+
+# Node node-0
+node_0 = request.RawPC('node-0')
+node_0.disk_image = 'urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU18-64-STD'
+
+# Dataset config that will be mounted to node-0
+iface = node_0.addInterface()
+
+fsnode = request.RemoteBlockstore("fsnode", "/dataset-path")
+fsnode.dataset = "urn:publicid:IDN+utah.cloudlab.us:cu-bison-lab-pg0+stdataset+test"
+fslink = request.Link("fslink")
+fslink.addInterface(iface)
+fslink.addInterface(fsnode.interface)
+fslink.best_effort = True
+fslink.vlan_tagging = True
+
+
+# Print the generated rspec
+pc.printRequestRSpec(request)
+```
+
+The nodes booted with this experiment as the setting will boot with the `test` dataset mounted on `/dataset-path`. This can be used as a scratch disk for the kernel build. 
+
+##### Shared File System
+
+Each node in CloudLab boots with a similar file system as shown below 
+
+```console
+variable@xdp-node:~$ df -h
+Filesystem                                   Size  Used Avail Use% Mounted on
+udev                                          32G     0   32G   0% /dev
+tmpfs                                        6.3G  1.2M  6.3G   1% /run
+/dev/sda1                                     16G  8.2G  6.8G  55% /
+tmpfs                                         32G     0   32G   0% /dev/shm
+tmpfs                                        5.0M     0  5.0M   0% /run/lock
+tmpfs                                         32G     0   32G   0% /sys/fs/cgroup
+ops.utah.cloudlab.us:/proj/cu-bison-lab-PG0  100G   30G   71G  30% /proj/cu-bison-lab-PG0
+ops.utah.cloudlab.us:/share                   97G   16G   74G  18% /share
+tmpfs                                        6.3G     0  6.3G   0% /run/user/20001
+```
+
+Without a dataset it is not possible to work on anything that uses more than 10GiB. The datasets on CloudLab can expire and it is painful to rebuild the kernel for every test. The approach we used was to use the shared file system provied for all nodes in the `cu-bison-lab-pg0` project
+
+`ops.utah.cloudlab.us:/proj/cu-bison-lab-PG0  100G   30G   71G  30% /proj/cu-bison-lab-PG0`
+
+The above file mount is 100GiB is size and is large enough for the kernel build. It will be mounted on all nodes that are created under the same project. This is persistant throughout the lifetime of the project itself.
+
+###### Warning⚠️: Shared File System contains backup data for the project
+
+It should be noted that the file `/proj/cu-bison-lab-PG0` also contains back up data of all experiments in the project. It is used by the IT Admins for backup related requests and system maintainability. If it is corrupted immediately contact the OPS team to restore it. Changing any of the files will disable the project and all creation of future nodes/experiments will fail.
+
 #### TODO check list for CloudLab specific set up
 
 - [x] XDP NIC support
 - [x] CloudLab `xl170` Profile support
-- [ ] disk space needed for kernel files
-- [ ] document shared workspace and problems
-- [ ] configurations for creating data set in CloudLab as a solution to shared work space issue
+- [x] disk space needed for kernel files
+- [x] document shared workspace and problems
+- [x] configurations for creating data set in CloudLab as a solution to shared work space issue
 - [ ] image creation for new compiled kernel 
